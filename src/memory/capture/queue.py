@@ -52,7 +52,8 @@ class Queue:
         items = []
         pending_dir = self.queue_dir / "pending"
         
-        for file_path in list(pending_dir.glob("*.json"))[:limit]:
+        # Get all pending files
+        for file_path in pending_dir.glob("*.json"):
             try:
                 with open(file_path, 'r') as f:
                     item = json.load(f)
@@ -61,7 +62,9 @@ class Queue:
                 # Skip corrupted files
                 continue
         
-        return sorted(items, key=lambda x: x.get('timestamp', ''))
+        # Sort by timestamp and return limited number
+        sorted_items = sorted(items, key=lambda x: x.get('timestamp', ''))
+        return sorted_items[:limit]
     
     def mark_processing(self, item_id: str) -> bool:
         """Mark item as processing"""
@@ -128,3 +131,37 @@ class Queue:
         for file_path in completed_dir.glob("*.json"):
             if file_path.stat().st_mtime < cutoff:
                 file_path.unlink()
+    
+    def get_item(self, item_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific item by ID from any state"""
+        for state in ["pending", "processing", "completed", "failed"]:
+            item_path = self.queue_dir / state / f"{item_id}.json"
+            if item_path.exists():
+                try:
+                    with open(item_path, 'r') as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    pass
+        return None
+    
+    def cleanup_old(self, days: int = 7) -> int:
+        """Remove old completed and failed items"""
+        from datetime import timedelta
+        
+        removed_count = 0
+        cutoff_time = datetime.now() - timedelta(days=days)
+        
+        for state in ["completed", "failed"]:
+            state_dir = self.queue_dir / state
+            for item_path in state_dir.glob("*.json"):
+                try:
+                    # Check file modification time
+                    mtime = datetime.fromtimestamp(item_path.stat().st_mtime)
+                    if mtime < cutoff_time:
+                        item_path.unlink()
+                        removed_count += 1
+                except Exception:
+                    # Skip files that can't be processed
+                    pass
+        
+        return removed_count
