@@ -1,0 +1,10 @@
+# Core dependencies - keeping it flexible
+openai-whisper
+ollama
+pyaudio
+click
+rich
+python-dotenv
+
+# Testing
+pytest
