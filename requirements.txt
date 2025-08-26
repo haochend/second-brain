@@ -5,6 +5,8 @@ pyaudio
 click
 rich
 python-dotenv
+chromadb
+mlx-whisper
 
 # Testing
 pytest

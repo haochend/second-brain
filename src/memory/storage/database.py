@@ -319,16 +319,21 @@ class Database:
         try:
             fts_query = """
                 SELECT m.* FROM memories m
-                JOIN memories_fts f ON m.uuid = f.uuid
-                WHERE memories_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
+                WHERE m.uuid IN (
+                    SELECT uuid FROM memories_fts 
+                    WHERE memories_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                )
+                ORDER BY m.timestamp DESC
             """
             cursor = self.conn.execute(fts_query, (query, limit))
             results = [Memory.from_row(row) for row in cursor]
             if results:
                 return results
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+            # Log the error but continue with fallback
+            print(f"FTS search failed, using fallback: {e}")
             pass
         
         # Fallback to LIKE query

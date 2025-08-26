@@ -19,9 +19,56 @@ from ..capture.voice import VoiceCapture
 from ..storage import Database
 from ..processing import MemoryProcessor, LLMExtractor
 from ..processing.transcription_mlx import MLXWhisperTranscriber
-from ..query import MemorySearch
+from ..query import MemorySearch, SemanticSearch
+from ..embeddings import EmbeddingGenerator, VectorStore
 
 console = Console()
+
+
+def get_processor(ctx):
+    """Lazy-load the processor with all its dependencies"""
+    if ctx.obj['processor'] is None:
+        # Initialize dependencies if needed
+        if ctx.obj['extractor'] is None:
+            ctx.obj['extractor'] = LLMExtractor()
+        if ctx.obj['embedding_generator'] is None:
+            ctx.obj['embedding_generator'] = EmbeddingGenerator()
+        if ctx.obj['vector_store'] is None:
+            ctx.obj['vector_store'] = VectorStore()
+        
+        # Create processor
+        ctx.obj['processor'] = MemoryProcessor(
+            queue=ctx.obj['queue'],
+            db=ctx.obj['db'],
+            extractor=ctx.obj['extractor'],
+            embedding_generator=ctx.obj['embedding_generator'],
+            vector_store=ctx.obj['vector_store']
+        )
+    return ctx.obj['processor']
+
+
+def get_semantic_search(ctx):
+    """Lazy-load semantic search with embeddings"""
+    if ctx.obj['semantic_search'] is None:
+        # Initialize dependencies if needed
+        if ctx.obj['embedding_generator'] is None:
+            ctx.obj['embedding_generator'] = EmbeddingGenerator()
+        if ctx.obj['vector_store'] is None:
+            ctx.obj['vector_store'] = VectorStore()
+        
+        ctx.obj['semantic_search'] = SemanticSearch(
+            db=ctx.obj['db'],
+            embedding_generator=ctx.obj['embedding_generator'],
+            vector_store=ctx.obj['vector_store']
+        )
+    return ctx.obj['semantic_search']
+
+
+def get_vector_store(ctx):
+    """Lazy-load vector store"""
+    if ctx.obj['vector_store'] is None:
+        ctx.obj['vector_store'] = VectorStore()
+    return ctx.obj['vector_store']
 
 
 @click.group()
@@ -32,19 +79,24 @@ def cli(ctx, debug):
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
     
-    # Initialize components
+    # Initialize core components (always needed)
     ctx.obj['db'] = Database()
     ctx.obj['queue'] = Queue()
-    ctx.obj['extractor'] = LLMExtractor()
-    ctx.obj['processor'] = MemoryProcessor(
-        queue=ctx.obj['queue'],
-        db=ctx.obj['db'],
-        extractor=ctx.obj['extractor']
-    )
+    
+    # Lazy initialization flags
+    ctx.obj['embedding_generator'] = None
+    ctx.obj['vector_store'] = None
+    ctx.obj['extractor'] = None
+    ctx.obj['processor'] = None
+    ctx.obj['semantic_search'] = None
+    
+    # Initialize capture (lightweight)
     ctx.obj['capture'] = TextCapture(
         queue=ctx.obj['queue'],
         db=ctx.obj['db']
     )
+    
+    # Initialize basic search (no embeddings needed)
     ctx.obj['search'] = MemorySearch(db=ctx.obj['db'])
 
 
@@ -138,7 +190,7 @@ def add(ctx, text, voice):
 @click.pass_context
 def process(ctx, now, limit):
     """Process pending memories"""
-    processor = ctx.obj['processor']
+    processor = get_processor(ctx)
     
     with console.status("[cyan]Processing memories...[/cyan]"):
         stats = processor.process_batch(limit=limit)
@@ -158,10 +210,15 @@ def process(ctx, now, limit):
 @cli.command()
 @click.argument('query')
 @click.option('--limit', default=10, help='Number of results')
+@click.option('--semantic', '-s', is_flag=True, help='Use semantic search instead of keyword search')
 @click.pass_context
-def search(ctx, query, limit):
-    """Search memories"""
-    search_engine = ctx.obj['search']
+def search(ctx, query, limit, semantic):
+    """Search memories (keyword or semantic)"""
+    if semantic:
+        search_engine = get_semantic_search(ctx)
+    else:
+        search_engine = ctx.obj['search']
+    
     results = search_engine.search(query, limit=limit)
     
     if not results:
@@ -188,6 +245,10 @@ def search(ctx, query, limit):
             
             if memory.extracted_data.get('topics'):
                 content += f"\n[blue]Topics:[/blue] {', '.join(memory.extracted_data['topics'])}\n"
+        
+        # Add relevance score if available (from semantic search)
+        if hasattr(memory, 'relevance_score'):
+            content += f"\n[dim]Relevance: {memory.relevance_score:.2%}[/dim]"
         
         timestamp = memory.timestamp.strftime("%Y-%m-%d %H:%M") if memory.timestamp else "Unknown"
         panel = Panel(
@@ -364,6 +425,76 @@ def cleanup(ctx, days, all):
         console.print("[yellow]No files to clean up[/yellow]")
 
 @cli.command()
+@click.argument('memory_id', required=False)
+@click.option('--limit', default=5, help='Number of related memories to find')
+@click.pass_context
+def related(ctx, memory_id, limit):
+    """Find memories related to a specific memory or the latest one"""
+    db = ctx.obj['db']
+    semantic_search = get_semantic_search(ctx)
+    
+    if not memory_id:
+        # Get the most recent memory
+        recent = db.get_recent_memories(1)
+        if not recent:
+            console.print("[yellow]No memories found[/yellow]")
+            return
+        memory = recent[0]
+        console.print(f"[cyan]Finding memories related to latest memory...[/cyan]\n")
+    else:
+        # Try to get memory by UUID or ID
+        memory = db.get_memory_by_uuid(memory_id)
+        if not memory:
+            try:
+                memory_id_int = int(memory_id)
+                # Need to implement get_memory_by_id if not available
+                memories = db.get_recent_memories(1000)  # Get many and filter
+                memory = next((m for m in memories if m.id == memory_id_int), None)
+            except ValueError:
+                pass
+        
+        if not memory:
+            console.print(f"[red]Memory not found: {memory_id}[/red]")
+            return
+    
+    # Show the source memory
+    console.print("[bold cyan]Source Memory:[/bold cyan]")
+    console.print(f"{memory.summary or memory.raw_text[:100]}...")
+    console.print()
+    
+    # Find related memories
+    related_memories = semantic_search.find_related(memory, limit=limit)
+    
+    if not related_memories:
+        console.print("[yellow]No related memories found[/yellow]")
+        return
+    
+    console.print(f"[bold cyan]Related Memories:[/bold cyan]\n")
+    
+    for i, related_memory in enumerate(related_memories, 1):
+        relevance = getattr(related_memory, 'relevance_score', 0)
+        timestamp = related_memory.timestamp.strftime("%Y-%m-%d") if related_memory.timestamp else "Unknown"
+        
+        console.print(f"[cyan]{i}.[/cyan] [{relevance:.1%} similar] {timestamp}")
+        console.print(f"   {related_memory.summary or related_memory.raw_text[:80]}...")
+        console.print()
+
+
+@cli.command()
+@click.option('--force', is_flag=True, help='Force reindex without confirmation')
+@click.pass_context
+def reindex(ctx, force):
+    """Reindex all memories in the vector database"""
+    semantic_search = get_semantic_search(ctx)
+    
+    if not force:
+        if not click.confirm("This will rebuild the entire vector index. Continue?"):
+            return
+    
+    semantic_search.reindex_all()
+
+
+@cli.command()
 @click.pass_context
 def init(ctx):
     """Initialize the memory system"""
@@ -372,16 +503,40 @@ def init(ctx):
     # Database is already initialized in context
     console.print("[green]✓[/green] Database initialized")
     
+    # Check vector store (only if initialized)
+    if ctx.obj['vector_store'] is not None:
+        vector_store = ctx.obj['vector_store']
+        console.print(f"[green]✓[/green] Vector store initialized ({vector_store.count()} embeddings)")
+    else:
+        console.print("[dim]Vector store not yet initialized[/dim]")
+    
     # Check Ollama
     try:
         import ollama
         models = ollama.list()
         console.print("[green]✓[/green] Ollama connected")
         
-        # Check for recommended model
-        model_names = [m['name'] for m in models.get('models', [])]
-        if not any('llama' in name.lower() for name in model_names):
-            console.print("[yellow]⚠[/yellow]  No Llama model found. Run: [cyan]ollama pull llama3.2[/cyan]")
+        # Check for recommended models
+        if hasattr(models, 'models'):
+            model_list = models.models
+        else:
+            model_list = models.get('models', [])
+        
+        model_names = []
+        for m in model_list:
+            if isinstance(m, dict):
+                model_names.append(m.get('name', ''))
+            else:
+                model_names.append(getattr(m, 'name', ''))
+        
+        # Check for LLM model
+        if not any('llama' in name.lower() or 'gpt' in name.lower() for name in model_names):
+            console.print("[yellow]⚠[/yellow]  No LLM model found. Run: [cyan]ollama pull gpt-oss:120b[/cyan]")
+        
+        # Check for embedding model
+        if not any('nomic' in name.lower() or 'embed' in name.lower() for name in model_names):
+            console.print("[yellow]⚠[/yellow]  No embedding model found. Run: [cyan]ollama pull nomic-embed-text[/cyan]")
+            
     except Exception as e:
         console.print(f"[red]✗[/red] Ollama not available: {e}")
         console.print("    Install from: https://ollama.ai")

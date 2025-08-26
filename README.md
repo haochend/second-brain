@@ -71,6 +71,9 @@ python run.py process  # Process pending memories
   - Emotional context and mood
 
 ### 🔍 Smart Retrieval
+- **Dual search modes:**
+  - Keyword search with SQLite FTS5 for exact matches
+  - Semantic search with vector embeddings for meaning-based queries
 - Natural language search
 - Multiple view types:
   - Task management view
@@ -78,6 +81,7 @@ python run.py process  # Process pending memories
   - Project overviews
   - Person interaction history
 - Automatic relationship detection between thoughts
+- Find related memories using vector similarity
 
 ### 🤖 AI Integration
 - MCP (Model Context Protocol) server
@@ -122,7 +126,8 @@ python run.py process  # Process pending memories
    # For Apple Silicon, MLX provides GPU acceleration
    
    # Install Ollama from https://ollama.ai
-   ollama pull gpt-oss:120b  # Or smaller models like llama3.2
+   ollama pull gpt-oss:120b      # LLM for extraction (or smaller like llama3.2)
+   ollama pull nomic-embed-text  # Embeddings for semantic search
    ```
 
 4. **Initialize the database:**
@@ -149,21 +154,24 @@ python run.py add
 ### Searching and Viewing
 
 ```bash
-# Natural language search
-memory search "decisions about the API design"
+# Keyword search (exact text matching)
+memory search "authentication"
+
+# Semantic search (meaning-based)
+memory search --semantic "what do I need to do today"
+memory search -s "security concerns"
+
+# Find related memories
+memory related                    # Related to latest memory
+memory related <memory-id>        # Related to specific memory
 
 # View tasks
 memory tasks
-memory tasks --pending
-memory tasks --project authsystem
+memory tasks --limit 20
 
 # Daily notes
 memory today
-memory yesterday
 memory date 2024-01-15
-
-# Project overview
-memory project authsystem
 ```
 
 ### Processing
@@ -175,8 +183,8 @@ memory status
 # Force immediate processing
 memory process --now
 
-# Review and correct extractions
-memory review
+# Reindex vector embeddings (after model change or recovery)
+memory reindex --force
 ```
 
 ## Architecture
@@ -189,9 +197,12 @@ The system uses a queue-based architecture for instant capture and background pr
 2. **Processing Pipeline**: Background transcription and extraction
    - Voice: MLX Whisper (GPU) → Text
    - Text: Ollama LLM → Structured extraction
-3. **Storage Layer**: SQLite with FTS5 for full-text search
-   - Manual FTS management (no triggers) for reliability
+   - Embeddings: Ollama nomic-embed-text → 768-dim vectors
+3. **Storage Layer**: Dual storage system
+   - SQLite with FTS5 for full-text search (no triggers, manual management)
+   - ChromaDB for vector embeddings and semantic search
 4. **Access Layer**: CLI with Rich formatting
+   - Lazy loading for optimal performance
 
 See `docs/unified_memory_design.md` for detailed architecture and `CLAUDE.md` for implementation details.
 
@@ -216,11 +227,12 @@ python -m memory.cli --dev
 - [x] Voice transcription with MLX Whisper (GPU-accelerated)
 - [x] LLM extraction with Ollama
 - [x] Full-text search with SQLite FTS5
+- [x] Semantic search with vector embeddings (ChromaDB + Ollama)
 - [x] Queue-based async processing
 - [x] Database with retry logic and concurrency handling
+- [x] Lazy loading for optimal CLI performance
 
 ### In Progress 🚧
-- [ ] Semantic search with vectors
 - [ ] MCP server for AI tools
 
 ### Planned 📋

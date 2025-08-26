@@ -13,7 +13,9 @@ Second Brain is a local-first memory augmentation system that captures thoughts 
 3. **LLM Extraction** - Ollama integration for structured data extraction
 4. **Queue System** - File-based queue for reliable async processing
 5. **Database** - SQLite with FTS5 for full-text search
-6. **CLI** - Rich terminal interface with multiple commands
+6. **Vector Storage** - ChromaDB for semantic search with embeddings
+7. **Dual Search** - Keyword (FTS5) and semantic (vector) search modes
+8. **CLI** - Rich terminal interface with lazy loading optimization
 
 ### 🔧 Key Technical Decisions
 
@@ -21,6 +23,9 @@ Second Brain is a local-first memory augmentation system that captures thoughts 
 - **Manual FTS Management**: Removed SQLite triggers due to "database disk image is malformed" errors with special characters
 - **Shared Database Instance**: Single connection shared across components to avoid locking issues
 - **Retry Logic**: Exponential backoff for database operations to handle concurrent access
+- **ChromaDB over SQLite-VSS**: Better performance for complex operations like finding 100 nearest neighbors
+- **Lazy Loading**: Components only initialized when needed (e.g., embeddings not loaded for `tasks` command)
+- **nomic-embed-text**: 768-dim embeddings, good balance of quality vs size (~274MB model)
 
 ## Memory Ingestion Flow
 
@@ -61,6 +66,8 @@ graph LR
     F --> G[Extracted Data]
     G --> H[Update Memory]
     H --> I[Update FTS]
+    H --> J[Generate Embedding]
+    J --> K[Store in ChromaDB]
 ```
 
 **Processing Steps:**
@@ -74,8 +81,10 @@ graph LR
    - `questions`, `ideas`, `decisions`: Specific insights
    - `mood`: Emotional context
    - `temporal`: Dates and relative time references
-4. **Database Update**: Memory updated with extracted data
-5. **FTS Update**: Manual update to FTS table (no triggers)
+4. **Generate Embeddings**: Ollama nomic-embed-text creates 768-dim vectors
+5. **Store in ChromaDB**: Vectors stored with metadata for semantic search
+6. **Database Update**: Memory updated with extracted data
+7. **FTS Update**: Manual update to FTS table (no triggers)
 
 ### 3. Retrieval Phase
 
