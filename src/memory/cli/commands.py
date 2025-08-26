@@ -18,7 +18,7 @@ from ..capture import Queue, TextCapture
 from ..capture.voice import VoiceCapture
 from ..storage import Database
 from ..processing import MemoryProcessor, LLMExtractor
-from ..processing.transcription import WhisperTranscriber
+from ..processing.transcription_mlx import MLXWhisperTranscriber
 from ..query import MemorySearch
 
 console = Console()

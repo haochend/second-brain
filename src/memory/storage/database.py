@@ -76,10 +76,17 @@ class Database:
     
     def _connect(self):
         """Create database connection"""
-        self.conn = sqlite3.connect(self.db_path)
+        # Use a longer timeout to handle concurrent access better
+        self.conn = sqlite3.connect(
+            self.db_path, 
+            timeout=30.0,  # 30 second timeout for lock acquisition
+            isolation_level='DEFERRED',  # Better transaction handling
+            check_same_thread=False
+        )
         self.conn.row_factory = sqlite3.Row
-        # Enable JSON support
+        # Enable WAL mode for better concurrent access
         self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
     
     def _init_schema(self):
         """Initialize database schema"""
@@ -132,9 +139,36 @@ class Database:
             VALUES ({', '.join(placeholders)})
         """
         
-        cursor = self.conn.execute(query, values)
-        self.conn.commit()
-        return cursor.lastrowid
+        # Retry logic for database locks
+        import time
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                cursor = self.conn.execute(query, values)
+                self.conn.commit()
+                memory_id = cursor.lastrowid
+                
+                # Manually update FTS table (safer than triggers)
+                try:
+                    fts_query = "INSERT INTO memories_fts(uuid, raw_text, summary) VALUES (?, ?, ?)"
+                    self.conn.execute(fts_query, (
+                        data.get('uuid', ''),
+                        data.get('raw_text', ''),
+                        data.get('summary', '')
+                    ))
+                    self.conn.commit()
+                except:
+                    pass  # FTS update is optional
+                
+                return memory_id
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) or "malformed" in str(e):
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1 * (2 ** attempt))  # Exponential backoff
+                        continue
+                raise
+        
+        raise sqlite3.OperationalError("Failed to add memory after retries")
     
     def get_memory(self, memory_id: Optional[int] = None, memory_uuid: Optional[str] = None) -> Optional[Memory]:
         """Get a memory by ID or UUID"""
@@ -159,7 +193,7 @@ class Database:
         return self.get_memory(memory_uuid=memory_uuid)
     
     def update_memory(self, memory: Memory) -> bool:
-        """Update an existing memory"""
+        """Update an existing memory with retry logic"""
         if not memory.id and not memory.uuid:
             return False
         
@@ -184,9 +218,89 @@ class Database:
         
         query = f"UPDATE memories SET {set_clause} WHERE {where_clause}"
         
-        cursor = self.conn.execute(query, values)
-        self.conn.commit()
-        return cursor.rowcount > 0
+        # Retry logic for database locks
+        import time
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                cursor = self.conn.execute(query, values)
+                self.conn.commit()
+                success = cursor.rowcount > 0
+                
+                if success:
+                    # Manually update FTS table (safer than triggers)
+                    try:
+                        # Delete old FTS entry
+                        self.conn.execute("DELETE FROM memories_fts WHERE uuid = ?", (where_param,))
+                        # Insert new FTS entry
+                        fts_query = "INSERT INTO memories_fts(uuid, raw_text, summary) VALUES (?, ?, ?)"
+                        self.conn.execute(fts_query, (
+                            where_param,
+                            data.get('raw_text', ''),
+                            data.get('summary', '')
+                        ))
+                        self.conn.commit()
+                    except:
+                        pass  # FTS update is optional
+                
+                return success
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) or "malformed" in str(e):
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1 * (2 ** attempt))  # Exponential backoff
+                        continue
+                raise
+        
+        return False
+    
+    def sync_fts(self):
+        """Sync FTS table with memories table (useful after manual DB changes)"""
+        try:
+            # Clear FTS
+            self.conn.execute("DELETE FROM memories_fts")
+            # Repopulate from memories
+            self.conn.execute("""
+                INSERT INTO memories_fts(uuid, raw_text, summary)
+                SELECT uuid, raw_text, COALESCE(summary, '') FROM memories
+            """)
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"FTS sync failed: {e}")
+            return False
+    
+    def delete_memory(self, memory_id: Optional[int] = None, memory_uuid: Optional[str] = None) -> bool:
+        """Delete a memory and its FTS entry"""
+        if memory_id:
+            where_clause = "id = ?"
+            where_param = memory_id
+        elif memory_uuid:
+            where_clause = "uuid = ?"
+            where_param = memory_uuid
+        else:
+            return False
+        
+        try:
+            # Get UUID for FTS deletion
+            if memory_id:
+                cursor = self.conn.execute("SELECT uuid FROM memories WHERE id = ?", (memory_id,))
+                row = cursor.fetchone()
+                uuid_to_delete = row[0] if row else None
+            else:
+                uuid_to_delete = memory_uuid
+            
+            # Delete from memories
+            cursor = self.conn.execute(f"DELETE FROM memories WHERE {where_clause}", (where_param,))
+            
+            # Delete from FTS if we have a UUID
+            if uuid_to_delete:
+                self.conn.execute("DELETE FROM memories_fts WHERE uuid = ?", (uuid_to_delete,))
+            
+            self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Delete failed: {e}")
+            return False
     
     def get_pending_memories(self, limit: int = 10) -> List[Memory]:
         """Get pending memories for processing"""

@@ -41,18 +41,5 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content_rowid='id'
 );
 
--- Trigger to keep FTS in sync
-CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-    INSERT INTO memories_fts(uuid, raw_text, summary) 
-    VALUES (new.uuid, new.raw_text, new.summary);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-    UPDATE memories_fts 
-    SET raw_text = new.raw_text, summary = new.summary 
-    WHERE uuid = new.uuid;
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-    DELETE FROM memories_fts WHERE uuid = old.uuid;
-END;
+-- Note: FTS triggers removed - FTS updates are handled in Python code
+-- to avoid "database disk image is malformed" errors with special characters

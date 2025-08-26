@@ -5,19 +5,19 @@ from typing import Optional, Dict
 from ..capture import Queue
 from ..storage import Database, Memory
 from .extraction import LLMExtractor
-from .transcription import WhisperTranscriber
+from .transcription_mlx import MLXWhisperTranscriber
 
 
 class MemoryProcessor:
     """Process queued memories"""
     
     def __init__(self, queue: Optional[Queue] = None, db: Optional[Database] = None, 
-                 extractor: Optional[LLMExtractor] = None, transcriber: Optional[WhisperTranscriber] = None):
+                 extractor: Optional[LLMExtractor] = None, transcriber: Optional[MLXWhisperTranscriber] = None):
         """Initialize processor"""
         self.queue = queue or Queue()
         self.db = db or Database()
         self.extractor = extractor or LLMExtractor()
-        self.transcriber = transcriber or WhisperTranscriber()
+        self.transcriber = transcriber or MLXWhisperTranscriber()
     
     def process_batch(self, limit: int = 10) -> Dict[str, int]:
         """Process a batch of pending memories"""
