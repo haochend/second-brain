@@ -1,5 +1,6 @@
 """Text input capture for memories"""
 
+import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any
 from .queue import Queue
@@ -20,15 +21,22 @@ class TextCapture:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
         
+        # Create a shared UUID for both queue and database
+        memory_uuid = str(uuid.uuid4())
+        
         # Add to queue for processing
+        metadata = metadata or {}
+        metadata['memory_uuid'] = memory_uuid
+        
         item_id = self.queue.add(
             item_type="text",
             content=text.strip(),
-            metadata=metadata or {}
+            metadata=metadata
         )
         
-        # Also add to database as pending
+        # Also add to database as pending with same UUID
         memory = Memory(
+            uuid=memory_uuid,
             raw_text=text.strip(),
             source="text",
             status="pending",

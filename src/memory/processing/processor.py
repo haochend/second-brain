@@ -32,13 +32,24 @@ class MemoryProcessor:
                 self.queue.mark_processing(item['id'])
                 
                 # Get the corresponding memory from database
-                memories = self.db.get_pending_memories(1)
-                if not memories:
-                    self.queue.mark_failed(item['id'], "No matching database entry")
-                    stats['failed'] += 1
-                    continue
+                # For voice items, use the memory_uuid from metadata
+                memory_uuid = item.get('metadata', {}).get('memory_uuid')
                 
-                memory = memories[0]
+                if memory_uuid:
+                    # Get memory by UUID
+                    memory = self.db.get_memory_by_uuid(memory_uuid)
+                    if not memory:
+                        self.queue.mark_failed(item['id'], f"No memory found with UUID: {memory_uuid}")
+                        stats['failed'] += 1
+                        continue
+                else:
+                    # Fallback to old behavior for text items
+                    memories = self.db.get_pending_memories(1)
+                    if not memories:
+                        self.queue.mark_failed(item['id'], "No matching database entry")
+                        stats['failed'] += 1
+                        continue
+                    memory = memories[0]
                 
                 # Process based on type
                 if item['type'] == 'text':

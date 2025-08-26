@@ -154,6 +154,10 @@ class Database:
             return Memory.from_row(row)
         return None
     
+    def get_memory_by_uuid(self, memory_uuid: str) -> Optional[Memory]:
+        """Convenience method to get memory by UUID"""
+        return self.get_memory(memory_uuid=memory_uuid)
+    
     def update_memory(self, memory: Memory) -> bool:
         """Update an existing memory"""
         if not memory.id and not memory.uuid:

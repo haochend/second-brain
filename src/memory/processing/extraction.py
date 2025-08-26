@@ -19,18 +19,38 @@ class LLMExtractor:
         """Check if Ollama is available"""
         try:
             # Check if model is available
-            models = ollama.list()
-            model_names = [m['name'] for m in models.get('models', [])]
+            response = ollama.list()
+            
+            # Access models from the response object
+            if hasattr(response, 'models'):
+                models = response.models
+            else:
+                # Handle as iterator of tuples
+                for key, value in response:
+                    if key == 'models':
+                        models = value
+                        break
+                else:
+                    models = []
+            
+            # Get model names
+            model_names = []
+            for model in models:
+                if hasattr(model, 'model'):
+                    model_names.append(model.model)
+                elif isinstance(model, dict):
+                    model_names.append(model.get('name', ''))
             
             # Handle model names with/without tags
             base_model = self.model_name.split(':')[0]
             if not any(base_model in name for name in model_names):
-                print(f"⚠️  Model '{self.model_name}' not found. Please run: ollama pull {self.model_name}")
+                print(f"⚠️  Model '{self.model_name}' not found. Available models: {model_names}")
+                print(f"Please run: ollama pull {self.model_name}")
                 # Try falling back to a simpler model
-                if any('llama' in name.lower() for name in model_names):
+                if any('llama' in name.lower() or 'gpt' in name.lower() for name in model_names):
                     for name in model_names:
-                        if 'llama' in name.lower():
-                            self.model_name = name.split(':')[0]
+                        if 'llama' in name.lower() or 'gpt' in name.lower():
+                            self.model_name = name
                             print(f"Using available model: {self.model_name}")
                             break
         except Exception as e:

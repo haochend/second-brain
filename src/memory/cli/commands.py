@@ -2,12 +2,17 @@
 
 import click
 import json
+import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
 from typing import Optional
+
+# Load environment variables
+load_dotenv()
 
 from ..capture import Queue, TextCapture
 from ..capture.voice import VoiceCapture
@@ -56,18 +61,23 @@ def add(ctx, text, voice):
             console.print("[cyan]Starting voice capture...[/cyan]")
             audio_path = voice_capture.start_recording()
             
+            # Create a shared UUID for both queue and database
+            import uuid
+            memory_uuid = str(uuid.uuid4())
+            
             # Add to queue for processing
             queue = ctx.obj['queue']
             item_id = queue.add(
                 item_type="voice",
                 content="",  # Will be transcribed later
-                metadata={"audio_path": audio_path}
+                metadata={"audio_path": audio_path, "memory_uuid": memory_uuid}
             )
             
-            # Also add to database as pending
+            # Also add to database as pending with same UUID
             db = ctx.obj['db']
             from ..storage import Memory
             memory = Memory(
+                uuid=memory_uuid,
                 raw_text="[Voice recording - pending transcription]",
                 source="voice",
                 status="pending",
