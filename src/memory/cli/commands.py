@@ -309,6 +309,61 @@ def status(ctx):
 
 
 @cli.command()
+@click.option('--days', default=7, help='Delete audio files older than N days')
+@click.option('--all', is_flag=True, help='Delete all processed audio files')
+@click.pass_context
+def cleanup(ctx, days, all):
+    """Clean up old audio files (for files kept with KEEP_AUDIO_AFTER_PROCESSING=true)"""
+    import os
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    
+    audio_dir = Path(os.path.expanduser("~/.memory/audio"))
+    if not audio_dir.exists():
+        console.print("[yellow]No audio directory found[/yellow]")
+        return
+    
+    db = ctx.obj['db']
+    
+    # Get all audio files
+    audio_files = list(audio_dir.glob("*.wav"))
+    if not audio_files:
+        console.print("[yellow]No audio files found[/yellow]")
+        return
+    
+    deleted_count = 0
+    total_size = 0
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    for audio_file in audio_files:
+        # Check if file is old enough
+        file_age = datetime.fromtimestamp(audio_file.stat().st_mtime)
+        
+        if all or file_age < cutoff_date:
+            # Check if it's been processed
+            # Search for the audio path in extracted_data
+            cursor = db.conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE extracted_data LIKE ? AND status = 'completed'",
+                (f'%{audio_file.name}%',)
+            )
+            is_processed = cursor.fetchone()[0] > 0
+            
+            if is_processed or all:
+                file_size = audio_file.stat().st_size
+                try:
+                    audio_file.unlink()
+                    deleted_count += 1
+                    total_size += file_size
+                    console.print(f"[green]✓[/green] Deleted {audio_file.name} ({file_size/1024:.1f} KB)")
+                except Exception as e:
+                    console.print(f"[red]✗[/red] Failed to delete {audio_file.name}: {e}")
+    
+    if deleted_count > 0:
+        console.print(f"\n[green]Cleaned up {deleted_count} files, freed {total_size/1024/1024:.1f} MB[/green]")
+    else:
+        console.print("[yellow]No files to clean up[/yellow]")
+
+@cli.command()
 @click.pass_context
 def init(ctx):
     """Initialize the memory system"""

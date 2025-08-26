@@ -2,6 +2,8 @@
 
 A unified memory system that captures all your thoughts through voice and text, understands them automatically, and surfaces them when you need them.
 
+**Status**: Working implementation with voice capture, MLX Whisper transcription, and LLM extraction
+
 ## What is this?
 
 Second Brain is a local-first memory augmentation system that:
@@ -30,7 +32,7 @@ pip install -r requirements.txt
 
 # Set up local models (one-time)
 # Install Ollama: https://ollama.ai
-ollama pull llama3.2
+ollama pull gpt-oss:120b  # Or any other model you prefer
 
 # Run the CLI
 python run.py --help
@@ -40,12 +42,14 @@ pip install -e .
 memory --help
 
 # Start capturing thoughts
-python run.py add "Just had a great idea about the new feature"
+python run.py add "Just had a great idea about the new feature"  # Text input
+python run.py add -v  # Voice capture (press Enter to start/stop)
 
 # Search your memories
 python run.py search "ideas from yesterday"
 python run.py tasks  # Show all tasks
 python run.py today  # Today's timeline
+python run.py process  # Process pending memories
 ```
 
 ## Key Features
@@ -57,14 +61,14 @@ python run.py today  # Today's timeline
 - No categorization needed - just think out loud
 
 ### 🧠 Intelligent Processing
-- Local transcription with Whisper
-- Automatic extraction of:
-  - Tasks and action items
+- Local transcription with MLX Whisper (GPU-accelerated on Apple Silicon)
+- Automatic extraction with LLM (Ollama) of:
+  - Tasks and action items with priorities
   - People, projects, and topics
   - Dates and deadlines
   - Ideas and observations
   - Questions and decisions
-  - Emotional context and energy levels
+  - Emotional context and mood
 
 ### 🔍 Smart Retrieval
 - Natural language search
@@ -90,9 +94,11 @@ python run.py today  # Today's timeline
 
 ### Requirements
 - Python 3.9+
-- 8GB RAM (16GB recommended)
-- 20GB free disk space
-- macOS, Linux, or Windows (WSL2)
+- 8GB RAM (16GB recommended for large LLMs)
+- 5GB free disk space (+ model storage)
+- macOS (Apple Silicon recommended), Linux, or Windows (WSL2)
+- Ollama for LLM extraction
+- PortAudio for voice capture
 
 ### Setup
 
@@ -110,11 +116,13 @@ python run.py today  # Today's timeline
    pip install -r requirements.txt
    ```
 
-3. **Set up Whisper and Ollama:**
+3. **Set up models:**
    ```bash
-   # Whisper will download on first use
+   # MLX Whisper models download automatically on first use
+   # For Apple Silicon, MLX provides GPU acceleration
+   
    # Install Ollama from https://ollama.ai
-   ollama pull llama3.2
+   ollama pull gpt-oss:120b  # Or smaller models like llama3.2
    ```
 
 4. **Initialize the database:**
@@ -127,14 +135,15 @@ python run.py today  # Today's timeline
 ### Capturing Thoughts
 
 ```bash
-# Voice capture (default)
-memory add
+# Voice capture (press Enter to start, Enter again to stop)
+python run.py add -v
+# or just: memory add -v
 
 # Text capture
-memory add "Remember to review the pull request"
+python run.py add "Remember to review the pull request"
 
-# With metadata
-memory add "Meeting with Sarah about auth" --project authsystem
+# Interactive text (multi-line, Ctrl+D to finish)
+python run.py add
 ```
 
 ### Searching and Viewing
@@ -175,11 +184,16 @@ memory review
 The system uses a queue-based architecture for instant capture and background processing:
 
 1. **Capture Layer**: Instant save to queue (<2 seconds)
+   - Voice: PyAudio → WAV file → Queue
+   - Text: Direct to Queue
 2. **Processing Pipeline**: Background transcription and extraction
-3. **Storage Layer**: SQLite for data, Qdrant for vectors
-4. **Access Layer**: CLI, MCP server, and future web UI
+   - Voice: MLX Whisper (GPU) → Text
+   - Text: Ollama LLM → Structured extraction
+3. **Storage Layer**: SQLite with FTS5 for full-text search
+   - Manual FTS management (no triggers) for reliability
+4. **Access Layer**: CLI with Rich formatting
 
-See `docs/unified_memory_design.md` for detailed architecture.
+See `docs/unified_memory_design.md` for detailed architecture and `CLAUDE.md` for implementation details.
 
 ## Development
 
@@ -197,11 +211,19 @@ python -m memory.cli --dev
 
 ## Roadmap
 
+### Completed ✅
 - [x] Core capture and processing pipeline
-- [x] Voice transcription with Whisper
+- [x] Voice transcription with MLX Whisper (GPU-accelerated)
 - [x] LLM extraction with Ollama
+- [x] Full-text search with SQLite FTS5
+- [x] Queue-based async processing
+- [x] Database with retry logic and concurrency handling
+
+### In Progress 🚧
 - [ ] Semantic search with vectors
 - [ ] MCP server for AI tools
+
+### Planned 📋
 - [ ] System tray application
 - [ ] Web interface
 - [ ] Mobile apps

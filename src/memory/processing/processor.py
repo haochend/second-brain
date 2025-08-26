@@ -118,6 +118,15 @@ class MemoryProcessor:
         
         # Save to database
         self.db.update_memory(memory)
+        
+        # Delete audio file after successful processing (unless explicitly disabled)
+        if os.getenv('KEEP_AUDIO_AFTER_PROCESSING', 'false').lower() != 'true':
+            try:
+                import os
+                os.remove(audio_path)
+                print(f"🗑️  Deleted audio file: {audio_path}")
+            except:
+                pass  # Don't fail if deletion doesn't work
     
     def process_single(self, text: str) -> Memory:
         """Process a single text immediately (for testing)"""
