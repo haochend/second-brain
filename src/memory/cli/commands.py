@@ -21,6 +21,7 @@ from ..processing import MemoryProcessor, LLMExtractor
 from ..processing.transcription_mlx import MLXWhisperTranscriber
 from ..query import MemorySearch, SemanticSearch
 from ..embeddings import EmbeddingGenerator, VectorStore
+from .prompt_commands import prompt_commands
 
 console = Console()
 
@@ -543,6 +544,9 @@ def init(ctx):
     
     console.print("\n[green]Ready to use![/green] Try: [cyan]memory add \"Your first thought\"[/cyan]")
 
+
+# Add prompt management commands to the CLI
+cli.add_command(prompt_commands)
 
 if __name__ == "__main__":
     cli()

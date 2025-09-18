@@ -8,5 +8,10 @@ python-dotenv
 chromadb
 mlx-whisper
 
+# Memory consolidation
+schedule
+scikit-learn
+numpy
+
 # Testing
 pytest

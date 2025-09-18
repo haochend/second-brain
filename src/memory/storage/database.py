@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, asdict
 import uuid
+from .consolidation_schema import migrate_database
 
 
 @dataclass
@@ -26,6 +27,10 @@ class Memory:
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    actionable: Optional[bool] = None
+    urgency: Optional[str] = None
+    completed: Optional[bool] = None
+    connections: Optional[List[str]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
@@ -118,6 +123,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
             """)
         self.conn.commit()
+        
+        # Apply consolidation schema
+        migrate_database(self.conn)
     
     def add_memory(self, memory: Memory) -> int:
         """Add a new memory to the database"""
